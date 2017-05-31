@@ -32,42 +32,48 @@ class LinearProgram:
         return 'Linear Program:\n' + str(self.constraints) + '\n' + str(self.objectiveFunction)
         
     def setIFS(self, x):
-        self.ifs = FeasibleSolution(x, self)
+        self.ifs = FeasibleSolution(x, self.constraints)
+        self.x_bar_hat = self.x_hat - self.ifs.delta * self.objectiveFunction.c
 
     def delta_large_enough(self, delta):
         return delta > float("inf")
 
     @property
+    def delta_x_hat(self):
+        return self.ifs.delta
+
+    @property
+    def x_hat(self):
+        return self.ifs.x
+
+    @property
+    def x_bar_hat(self):
+        return self.x_bar_hat
+
     def solve(self):
         # start with centering step (p. 5, section 2.1)
 
         # Begin Step2
         delta_prev = 0
-        delta_x_hat, touching_constraints = self.constraints.deltaAndTouchingConstraints(self.ifs)
-        if not self.delta_large_enough(delta_x_hat):
-            #implementation detail page 6
-            d0 = TouchingConstraints(touching_constraints).average_direction()
-            d00 = d0 - self.objectiveFunction.c * (np.dot(self.objectiveFunction.c, d0)) / self.objectiveFunction.norm_sqd
+        # delta_x_hat, touching_constraints = self.constraints.deltaAndTouchingConstraints(self.ifs)
+        if not self.delta_large_enough(self.delta_x_hat):
+            # 2ii: implementation detail page 6
+            d0 = self.ifs.average_direction_of_touching_constraints()
+            d00 = d0 - self.objectiveFunction.c * (np.dot(self.objectiveFunction.c, d0) / self.objectiveFunction.norm_sqd)
             #now solve 2-var LP
             a = [[ constraint.norm, -np.dot(constraint.a, d00)] for constraint in self.constraints.constraints]
-            # a.append([1, 0]) # delta non-negative
-            # a.append([0, 1]) # alpha non-negative
             b = [np.dot(constraint.a, self.ifs.x) - constraint.b for constraint in self.constraints.constraints]
-            b.append(0)  # delta non-negative
-            b.append(0)  # alpha non-negative
             c = [1, 0]
             two_var_LP  = TwoVariableLP(a, b, c)
-            soln = two_var_LP.optimal_solution()
-        return soln
-
-class TouchingConstraints:
-    def __init__(self, constraints):
-        self.constraints = constraints
-
-    def average_direction(self):
-        a_total = sum([constraint.a for constraint in self.constraints])
-        a_average = a_total / float(len(self.constraints))
-        return a_average
+            delta, alpha = two_var_LP.optimal_solution()
+            self.imp_detail_delta = delta
+            self.imp_detail_alpha = alpha
+            self.setIFS(self.ifs.x + alpha * d00)
+        # 2. Substep Continued:
+        # touching_points_projected_to_objective_plane = []
+        # for touching_point in self.ifs.touchingPoints:
+        #     projected_tp =
+        #     touching_points_projected_to_objective_plane.append()
 
 class Constraint:
     # Assume constraint is inequality of form ax >= b
@@ -83,27 +89,27 @@ class Constraint:
     def directedDistanceFrom(self, x):
         return (np.inner(self.a, x) - self.b) / self.norm
     
-    def nearestPoint(self, x):
+    def project(self, x):
         return x - self.a * self.directedDistanceFrom(x) / self.norm
 
 class Constraints:
     def __init__(self, constraints_):
         self.constraints = constraints_[0:]
-        self.A = np.matrix([constraint.a for constraint in constraints_])
-        self.b = np.array([constraint.b for constraint in constraints_])
+        # self.A = np.matrix([constraint.a for constraint in constraints_])
+        # self.b = np.array([constraint.b for constraint in constraints_])
         
     def __str__(self):
         s = 'constraints:'
         for con in self.constraints:
             s += '\n' + str(con)
         return s
-        
-    def deltaAndTouchingConstraints(self, ifs):
-        distances = [con.directedDistanceFrom(ifs.x) for con in self.constraints]
-        delta = min(distances)
-        distWithConstraint = zip(distances,self.constraints)
-        return  (delta, [ constraint for dist, constraint in distWithConstraint if dist == delta]) 
-           
+    #
+    # def deltaAndTouchingConstraints(self, ifs):
+    #     distances = [con.directedDistanceFrom(ifs.x) for con in self.constraints]
+    #     delta = min(distances)
+    #     distWithConstraint = zip(distances,self.constraints)
+    #     return  (delta, [ constraint for dist, constraint in distWithConstraint if dist == delta])
+    #
 class ObjectiveFunction:
     def __init__(self, c_):
         self.c = np.array(c_)
@@ -130,23 +136,26 @@ class TouchPoint:
 
 
 class FeasibleSolution:
-    def __init__(self, x_, linearProgram):
+    def __init__(self, x_, cons):
+        constraints = cons.constraints
         self.x = np.array(x_)
         self.norm =  np.sqrt(np.sum(self.x * self.x))
-        distances = [abs(con.directedDistanceFrom(x_)) for con in linearProgram.constraints.constraints]
+        distances = [abs(con.directedDistanceFrom(x_)) for con in constraints]
         self.delta = min(distances)
-        distWithConstraint = zip(distances,linearProgram.constraints.constraints)
-        self.touchingConstraints =  [ constraint for dist, constraint in distWithConstraint if dist == self.delta]
-        self.bottomOfBall = self.x -  linearProgram.objectiveFunction.normed * self.delta
+        touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist == self.delta]
+        # self.bottomOfBall = self.x -  linearProgram.objectiveFunction.normed * self.delta
         # self.touchingPoints = [TouchPoint(self.x, self.bottomOfBall, self.delta, constraint, linearProgram.constraints) for constraint in self.touchingConstraints]
-        self.touchingPoints = [TouchPoint(self.x, self.delta, constraint) for constraint in self.touchingConstraints]
+        self.touchingPoints = [TouchPoint(self.x, self.delta, constraint) for constraint in touching_constraints]
 
     def __str__(self):
         return 'feasible solution:\n x=' + str(self.x) \
             + '\n delta = ' + str(self.delta) \
-            + '\n bottom of ball = '+ str(self.bottomOfBall) \
-            + '\n # touching points = ' + str(len(self.touchingConstraints)) + '\n' \
+            + '\n # touching points = '  \
             + '\n'.join([str(tp) for tp in self.touchingPoints])
+
+    def average_direction_of_touching_constraints(self):
+        return sum([touch_point.constraint.a for touch_point in self.touchingPoints]) / float(len(self.touchingPoints))
+
 
 class TwoVariableLP:
     # solving max cx s/t ax <= b
@@ -168,12 +177,6 @@ class TwoVariableLP:
             m.addConstr(x * a[0] + y * a[1] <= b, "c"+str(p))
             p += 1
         m.optimize()
-        for v in m.getVars():
-            s = v.varName + ' ' + str(v.x)
-            print s
-
-
-
-
+        return [v.x for v in m.getVars()]
 
 

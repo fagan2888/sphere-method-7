@@ -66,7 +66,7 @@ class ConstraintTests(unittest.TestCase):
     def test1(self):
         a1 = sp.Constraint([1, 2, 3], 3)
         x = np.array([0, 0, 0])
-        nearest = a1.nearestPoint(x)
+        nearest = a1.project(x)
         # would like this to run with Python 3, but for now must cast ints to float
         self.assertAlmostEqual(nearest[0], 3.0 / 14)
         self.assertAlmostEqual(nearest[1], 6.0/ 14)
@@ -80,9 +80,28 @@ class TouchingConstraintsTests(unittest.TestCase):
         c = sp.ObjectiveFunction([-1, -2, -1])
         lp = sp.LinearProgram(A, c)
         lp.setIFS([0.5, 0.5, 0.5])
-        delta_x_hat, touching_constraints = A.deltaAndTouchingConstraints(lp.ifs)
-        avg_dir= sp.TouchingConstraints(touching_constraints).average_direction()
+        # delta_x_hat, touching_constraints = A.deltaAndTouchingConstraints(lp.ifs)
+        avg_dir= lp.ifs.average_direction_of_touching_constraints()
         self.assertAlmostEqual(avg_dir[0], -1)
+
+class ImplementationDetailTests(unittest.TestCase):
+    def test_optimal_delta(self):
+        A_input = [[-1.5, -1],
+                   [-1.0, -1],
+                   [-0.3, -0.5],
+                   [-1, 0],
+                   [0, -1],
+                   [1, 0],
+                   [0, 1],
+                   ]
+        b_input = [-27, -21, -9, -15, -16, 0, 0]
+        A = sp.Constraints([sp.Constraint(a, b) for a, b in zip(A_input, b_input)])
+        c = sp.ObjectiveFunction([-600, -100])
+        lp = sp.LinearProgram(A, c)
+        lp.setIFS([1, 3])
+        lp.solve()
+        self.assertAlmostEqual(lp.imp_detail_alpha, 10.5714285714)
+        self.assertAlmostEqual(lp.imp_detail_delta, 1.28571428571)
 
 def main():
     unittest.main()
