@@ -46,7 +46,6 @@ class LinearProgram:
     def x_hat(self):
         return self.ifs.x
 
-    @property
     def x_bar_hat(self):
         return self.x_bar_hat
 
@@ -65,15 +64,16 @@ class LinearProgram:
             b = [np.dot(constraint.a, self.ifs.x) - constraint.b for constraint in self.constraints.constraints]
             c = [1, 0]
             two_var_LP  = TwoVariableLP(a, b, c)
-            delta, alpha = two_var_LP.optimal_solution()
-            self.imp_detail_delta = delta
-            self.imp_detail_alpha = alpha
+            self.imp_detail_delta, self.imp_detail_alpha = two_var_LP.optimal_solution()
+            alpha = self.imp_detail_alpha
             self.setIFS(self.ifs.x + alpha * d00)
-        # 2. Substep Continued:
-        # touching_points_projected_to_objective_plane = []
-        # for touching_point in self.ifs.touchingPoints:
-        #     projected_tp =
-        #     touching_points_projected_to_objective_plane.append()
+        delta = self.ifs.delta
+        # 2. Substep Continued, page 6, our step 2iii
+        # Get T(x_hat), x_bar_hat,  x_bar_hat_i for each touch point
+        # touch_points = self.ifs.touchingPoints
+        # x_bar_hat = self.ifs.x
+        # x_bar_hat_i = [ tp. for tp in touch_points]
+
 
 class Constraint:
     # Assume constraint is inequality of form ax >= b
