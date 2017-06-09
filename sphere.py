@@ -33,7 +33,7 @@ class LinearProgram:
         
     def setIFS(self, x):
         self.ifs = FeasibleSolution(x, self.constraints)
-        self.x_bar_hat = self.x_hat - self.ifs.delta * self.objectiveFunction.c
+        # self.x_bar_hat = self.x_hat - self.ifs.delta * self.objectiveFunction.c
 
     def delta_large_enough(self, delta):
         return delta > float("inf")
@@ -68,11 +68,15 @@ class LinearProgram:
             alpha = self.imp_detail_alpha
             self.setIFS(self.ifs.x + alpha * d00)
         delta = self.ifs.delta
+        if delta == 0:
+            return 'Finished at step 2iii. '
         # 2. Substep Continued, page 6, our step 2iii
         # Get T(x_hat), x_bar_hat,  x_bar_hat_i for each touch point
-        # touch_points = self.ifs.touchingPoints
-        # x_bar_hat = self.ifs.x
-        # x_bar_hat_i = [ tp. for tp in touch_points]
+        touch_points = self.ifs.touchingPoints
+        x_bar_hat = self.ifs.x
+        x_bar_hat_i = [ self.objectiveFunction.project_point_to_plane_through_another_point(tp.touch_point, x_bar_hat) for tp in touch_points]
+        # Step 2 iv
+        print(x_bar_hat_i)
 
 
 class Constraint:
@@ -120,12 +124,17 @@ class ObjectiveFunction:
     def __str__(self):
         return 'minimize ' + str(self.c) + 'x'
 
+    def project_point_to_plane_through_another_point(self, x, plane_point):
+        distance_to_point = (np.inner(self.c, x) - np.inner(self.c, plane_point)) / self.norm
+        return x - self.c * distance_to_point / self.norm
+
+
 class TouchPoint:
     def __init__(self, ballCenter, delta, constraint): #, ballBottom, constraints):
         self.ballCenter = ballCenter
         self.delta = delta #yes, this could be computed, but we presumably already have it
         self.constraint = constraint
-        self.touchPoint = ballCenter - constraint.a * (constraint.a * ballCenter - constraint.b) / constraint.norm ** 2
+        self.touch_point = ballCenter - constraint.a * (constraint.a * ballCenter - constraint.b) / constraint.norm ** 2
         # now apply subroutine 1 to get alpha range, which requires a and g as inputs
         # a = constraints.A.dot(self.touchPoint).getA1() - constraints.b
         # g = constraints.A.dot(ballBottom - self.touchPoint).getA1()
