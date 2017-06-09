@@ -1,5 +1,6 @@
 import unittest
 import sphere as sp
+import math
 import numpy as np
 
 # Here's our "unit".
@@ -102,6 +103,10 @@ class ImplementationDetailTests(unittest.TestCase):
         lp.solve()
         self.assertAlmostEqual(lp.imp_detail_alpha, 10.5714285714)
         self.assertAlmostEqual(lp.imp_detail_delta, 1.28571428571)
+
+class NumericalTestToEnsureRunningPython3(unittest.TestCase):
+    def test_integerDivide(self):
+        self.assertAlmostEquals(0.5, 1/2)
 
 def main():
     unittest.main()
