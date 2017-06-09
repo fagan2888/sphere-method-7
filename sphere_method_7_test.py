@@ -106,7 +106,7 @@ class ImplementationDetailTests(unittest.TestCase):
 
 class NumericalTestToEnsureRunningPython3(unittest.TestCase):
     def test_integerDivide(self):
-        self.assertAlmostEquals(0.5, 1/2)
+        self.assertAlmostEqual(0.5, 1/2)
 
 def main():
     unittest.main()
