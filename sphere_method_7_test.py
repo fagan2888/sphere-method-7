@@ -99,10 +99,24 @@ class ImplementationDetailTests(unittest.TestCase):
         A = sp.Constraints([sp.Constraint(a, b) for a, b in zip(A_input, b_input)])
         c = sp.ObjectiveFunction([-600, -100])
         lp = sp.LinearProgram(A, c)
+        lp.improvement_threshold_step_2_v = float("inf")
         lp.setIFS([1, 3])
         lp.solve()
         self.assertAlmostEqual(lp.imp_detail_alpha, 10.5714285714)
         self.assertAlmostEqual(lp.imp_detail_delta, 1.28571428571)
+        self.assertAlmostEqual(lp.x_bar_hat_i[0][0], 1.25096525)
+        self.assertAlmostEqual(lp.x_bar_hat_i[1][1], 0.03474903)
+
+        lp = sp.LinearProgram(A, c)
+        lp.improvement_threshold_step_2_v =  0.1
+        lp.setIFS([1, 3])
+        lp.solve()
+        # are these right? Only David knows...
+        self.assertAlmostEqual(lp.imp_detail_alpha, 0)
+        self.assertAlmostEqual(lp.imp_detail_delta, 1.28571428571)
+        self.assertAlmostEqual(lp.x_bar_hat_i[0][0], 14.999862509652509)
+        self.assertAlmostEqual(lp.x_bar_hat_i[1][1], 2.3262319111969112)
+
 
 class NumericalTestToEnsureRunningPython3(unittest.TestCase):
     def test_integerDivide(self):
