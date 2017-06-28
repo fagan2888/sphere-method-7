@@ -157,6 +157,31 @@ class LinearProgram:
                 break
         print('centering_count = ' +str(centering_count) )
 
+        # Step 2.2 in paper, bottom of page 10. Step 3 in whiteboard algorithm.
+        x_bar = x_c_of_alpha
+        self.setIFS(x_bar)
+        # if boundary point, we are optimal (done)
+        if self.ifs.delta == 0:
+            return "done"
+
+        # Descent steps
+        # page 11, (a)
+        # Descend in direction of objective function
+        direction = - self.objectiveFunction.c
+        gamma2 = self.general_descent(direction)
+        print('stop here')
+
+    def general_descent(self, direction):
+        gamma2 = float("inf")
+        for constraint in self.constraints.constraints:
+            a_dot_d = np.inner(constraint.a, direction)
+            if a_dot_d < 0:
+                gamma2 = min (gamma2, (constraint.b - np.inner(constraint.a, self.x_hat )) / a_dot_d)
+        if gamma2 == float("inf"):
+            return "Objective function unbounded below"
+        epsilon_descent = 0.1
+        return gamma2 - epsilon_descent
+
 
 class Constraint:
     # Assume constraint is inequality of form ax >= b
