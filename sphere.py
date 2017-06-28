@@ -38,7 +38,7 @@ class LinearProgram:
         
     def setIFS(self, x):
         self.ifs = FeasibleSolution(x, self.constraints)
-        # self.x_hat_bar = self.x_hat - self.ifs.delta * self.objectiveFunction.c
+        self.x_hat_bar = bottom_of_ball(self.ifs, self.objectiveFunction)
 
     def delta_large_enough(self, delta):
         return delta > float("inf")
@@ -91,56 +91,71 @@ class LinearProgram:
                 return 'Finished at step 2iii. '
             # 2. Substep Continued, page 6, our step 2iii
             # Get T(x_hat), x_hat_bar,  x_hat_bar_i for each touch point
-            touch_points = self.ifs.touchingPoints
-            x_hat_bar = bottom_of_ball(self.ifs, self.objectiveFunction)
-            self.x_hat_bar_i = [ self.objectiveFunction.project_point_to_plane_through_another_point(tp.touch_point, x_hat_bar) for tp in touch_points]
-            # print( self.x_hat_bar_i)
+            # touch_points = self.ifs.touchingPoints
+            # self.x_hat_bar_i = [ self.objectiveFunction.project_point_to_plane_through_another_point(tp.touch_point, self.x_hat_bar) for tp in self.ifs.touchingPoints]
             # Step 2 iv
             # iterate over touch points, using Subroutine 1 to find all ranges of alphas
             alpha_i2s = []
-            for tp, xbh in zip(touch_points, self.x_hat_bar_i):
+            for tp in self.ifs.touchingPoints:
                 a = []
                 for constraint in self.constraints.constraints:
                     x = np.inner(constraint.a, tp.touch_point) - constraint.b
                     a.append(x)
-                g = [np.inner(constraint.a, xbh - tp.touch_point) for constraint in self.constraints.constraints]
+                g = [np.inner(constraint.a, self.x_hat_bar - tp.touch_point) for constraint in self.constraints.constraints]
                 alpha_range = subroutine1(a, g)
                 if alpha_range[1] == float("inf"):
                     return 'solution diverges to -infinity'
                 alpha_i2s.append(alpha_range[1])
-            objective_at_x_hat_bar = np.inner(x_hat_bar, self.objectiveFunction.c)
+            objective_at_x_hat_bar = np.inner(self.x_hat_bar, self.objectiveFunction.c)
 
             best_objective_change = None
-            for tp, alpha_i2 in zip(touch_points, alpha_i2s):
-                x_hat_i2 = alpha_i2 * x_hat_bar + (1 - alpha_i2) * tp.touch_point
+            for tp, alpha_i2 in zip(self.ifs.touchingPoints, alpha_i2s):
+                x_hat_i2 = alpha_i2 * self.x_hat_bar + (1 - alpha_i2) * tp.touch_point
                 objective_change = np.inner(x_hat_i2, self.objectiveFunction.c) - objective_at_x_hat_bar
                 if not best_objective_change or objective_change < best_objective_change:
                     best_objective_change = objective_change
                     x_hat_r2 = x_hat_i2
                     x_hat_r = tp.touch_point
 
-            self.x_tilda = x_hat_bar + (1 - self.epsilon_step_2_v()) * (x_hat_r2 - x_hat_bar)
+            self.x_tilda = self.x_hat_bar + (1 - self.epsilon_step_2_v()) * (x_hat_r2 - self.x_hat_bar)
             if -best_objective_change > self.improvement_threshold_step_2_v:
                 self.ifs = FeasibleSolution(self.x_tilda, self.constraints)
             else:
                 break
         
         # Step 2 vi
-        x_tilda_ifs = FeasibleSolution(self.x_tilda, self.constraints)
-        y_tilda = bottom_of_ball(x_tilda_ifs, self.objectiveFunction)
-        y_1 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r, y_tilda)
-        y_2 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r2, y_tilda)
-        # use subroutine 1 to find feasible range of alphas connecting y_1 and y_2
-        # dy = y_2 - y_1
-        # a = [np.inner(con.a, y_1) - con.b for con in self.constraints.constraints]
-        # g = [np.inner(con.a, dy)  for con in self.constraints.constraints]
-        # alpha1, alpha2 = subroutine1(a, g)
-        # # top of page 10!
-        # a = [ [con.norm , - np.inner(con.a, dy)] for con in self.constraints.constraints ]
-        # # add non-negativity constraint
-        # b = [ (np.inner(con.a, y_1) - con.b) for con in self.constraints.constraints ]
-        # c = [1, 0]
-        # twoVarLP = TwoVariableLP(a, b, c)
+        previous_opt_delta = float("-inf")
+        centering_count = 0
+        while True:
+            centering_count += 1
+            x_tilda_ifs = FeasibleSolution(self.x_tilda, self.constraints)
+            y_tilda = bottom_of_ball(x_tilda_ifs, self.objectiveFunction)
+            y_1 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r, y_tilda)
+            y_2 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r2, y_tilda)
+            # use subroutine 1 to find feasible range of alphas connecting y_1 and y_2
+            dy = y_2 - y_1
+            a = [np.inner(con.a, y_1) - con.b for con in self.constraints.constraints]
+            g = [np.inner(con.a, dy)  for con in self.constraints.constraints]
+            alpha1, alpha2 = subroutine1(a, g)
+            # # top of page 10!
+            # create 2-var LP, with variables delta and alpha (in that order)
+            a = [ [con.norm , - np.inner(con.a, dy)] for con in self.constraints.constraints ]
+            # # add non-negativity constraint
+            b = [ (np.inner(con.a, y_1) - con.b) for con in self.constraints.constraints ]
+            c = [1, 0]
+
+            twoVarLP = TwoVariableLP(a, b, c)
+            opt_delta, opt_alpha = twoVarLP.optimal_solution()
+            if opt_alpha == float("inf"):
+                return "unbounded"
+            x_c_of_alpha = opt_alpha * y_1 + (1 - opt_alpha) * y_2
+            # TODO: per page 10, last para of Approach 2, could continue
+            # if objective improving at "good rate"
+            if opt_delta > previous_opt_delta:
+                previous_opt_delta = opt_delta
+            else:
+                break
+        print('centering_count = ' +str(centering_count) )
 
 
 class Constraint:
@@ -178,6 +193,7 @@ class Constraints:
     #     distWithConstraint = zip(distances,self.constraints)
     #     return  (delta, [ constraint for dist, constraint in distWithConstraint if dist == delta])
     #
+
 class ObjectiveFunction:
     def __init__(self, c_):
         self.c = np.array(c_)
@@ -216,8 +232,6 @@ class FeasibleSolution:
         distances = [abs(con.directedDistanceFrom(x_)) for con in constraints]
         self.delta = min(distances)
         touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist == self.delta]
-        # self.bottomOfBall = self.x -  linearProgram.objectiveFunction.normed * self.delta
-        # self.touchingPoints = [TouchPoint(self.x, self.bottomOfBall, self.delta, constraint, linearProgram.constraints) for constraint in self.touchingConstraints]
         self.touchingPoints = [TouchPoint(self.x, self.delta, constraint) for constraint in touching_constraints]
 
     def __str__(self):
