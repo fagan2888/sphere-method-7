@@ -26,7 +26,11 @@ def subroutine1(a, g):
 
 def bottom_of_ball(ifs, objective_function):
     return ifs.x - (ifs.delta / objective_function.norm) * objective_function.c
-            
+
+def average_vector(vectors):
+   return sum(vectors) / float(len(vectors))
+
+
 class LinearProgram:
     def __init__(self, constraints, objectiveFunction):
         self.constraints = constraints
@@ -72,11 +76,11 @@ class LinearProgram:
         # start with centering step (p. 5, section 2.1)
         while True:
 
-            # Begin Step2
+            # Begin Step2 (Centering Step)
             delta_prev = 0
             if not self.delta_large_enough(self.delta_x_hat):
                 # 2ii: implementation detail page 6
-                d0 = self.ifs.average_direction_of_touching_constraints()
+                d0 = self.ifs.average_direction_of_touching_constraints
                 d00 = d0 - self.objectiveFunction.c * (np.dot(self.objectiveFunction.c, d0) / self.objectiveFunction.norm_sqd)
                 #now solve 2-var LP
                 a = [[ constraint.norm, -np.dot(constraint.a, d00)] for constraint in self.constraints.constraints]
@@ -122,65 +126,107 @@ class LinearProgram:
                 self.ifs = FeasibleSolution(self.x_tilda, self.constraints)
             else:
                 break
-        
+
         # Step 2 vi
-        previous_opt_delta = float("-inf")
-        centering_count = 0
-        while True:
-            centering_count += 1
-            x_tilda_ifs = FeasibleSolution(self.x_tilda, self.constraints)
-            y_tilda = bottom_of_ball(x_tilda_ifs, self.objectiveFunction)
-            y_1 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r, y_tilda)
-            y_2 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r2, y_tilda)
-            # use subroutine 1 to find feasible range of alphas connecting y_1 and y_2
-            dy = y_2 - y_1
-            a = [np.inner(con.a, y_1) - con.b for con in self.constraints.constraints]
-            g = [np.inner(con.a, dy)  for con in self.constraints.constraints]
-            alpha1, alpha2 = subroutine1(a, g)
-            # # top of page 10!
-            # create 2-var LP, with variables delta and alpha (in that order)
-            a = [ [con.norm , - np.inner(con.a, dy)] for con in self.constraints.constraints ]
-            # # add non-negativity constraint
-            b = [ (np.inner(con.a, y_1) - con.b) for con in self.constraints.constraints ]
-            c = [1, 0]
+        if True:
+            previous_center = None
+            previous_opt_delta = float("-inf")
+            centering_count = 0
+            while True:
+                centering_count += 1
+                x_tilda_ifs = FeasibleSolution(self.x_tilda, self.constraints)
+                y_tilda = bottom_of_ball(x_tilda_ifs, self.objectiveFunction)
+                y_1 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r, y_tilda)
+                y_2 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r2, y_tilda)
+                # use subroutine 1 to find feasible range of alphas connecting y_1 and y_2
+                dy = y_2 - y_1
+                a = [np.inner(con.a, y_1) - con.b for con in self.constraints.constraints]
+                g = [np.inner(con.a, dy)  for con in self.constraints.constraints]
+                alpha1, alpha2 = subroutine1(a, g)
+                # # top of page 10!
+                # create 2-var LP, with variables delta and alpha (in that order)
+                a = [ [con.norm , - np.inner(con.a, dy)] for con in self.constraints.constraints ]
+                # # add non-negativity constraint
+                b = [ (np.inner(con.a, y_1) - con.b) for con in self.constraints.constraints ]
+                c = [1, 0]
 
-            twoVarLP = TwoVariableLP(a, b, c)
-            opt_delta, opt_alpha = twoVarLP.optimal_solution()
-            if opt_alpha == float("inf"):
-                return "unbounded"
-            x_c_of_alpha = opt_alpha * y_1 + (1 - opt_alpha) * y_2
-            # TODO: per page 10, last para of Approach 2, could continue
-            # if objective improving at "good rate"
-            if opt_delta > previous_opt_delta:
-                previous_opt_delta = opt_delta
+                twoVarLP = TwoVariableLP(a, b, c)
+                opt_delta, opt_alpha = twoVarLP.optimal_solution()
+                if opt_alpha == float("inf"):
+                    return "unbounded"
+                x_c_of_alpha = opt_alpha * y_1 + (1 - opt_alpha) * y_2
+                # TODO: per page 10, last para of Approach 2, could continue
+                # if objective improving at "good rate"
+                if opt_delta > previous_opt_delta:
+                    previous_opt_delta = opt_delta
+                else:
+                    break
+            print('centering_count = ' +str(centering_count) )
+
+            # Step 2.2 in paper, bottom of page 10. Step 3 in whiteboard algorithm.
+            x_bar = x_c_of_alpha
+            self.setIFS(x_bar)
+            # if boundary point, we are optimal (done)
+            if self.ifs.delta == 0:
+                return "done"
+
+        # Descent steps, page 11, (a)
+        if True:
+            gamma_set = []
+
+            # Descend in direction of objective function
+            gamma_set.append(self.general_descent(- self.objectiveFunction.c, 'obj function'))
+
+            # average of collection of orthogonal projections of obj function onto each touch point
+            c_i_s = []
+            for tp in self.ifs.touchingPoints:
+                constraint = tp.constraint
+                c_i = self.objectiveFunction.c \
+                      - constraint.a * (np.inner(constraint.a, self.objectiveFunction.c)/constraint.norm)
+                c_i_s.append(c_i)
+
+            gamma_set.append(self.general_descent(- average_vector(c_i_s), 'avg projected obj function'))
+
+            # average of touching point normal vectors (* -1 if vector opposes obj function)
+            tp_normals_signed = []
+            for tp in self.ifs.touchingPoints:
+                constraint = tp.constraint
+                if np.inner(constraint.a, self.objectiveFunction.c) < 0:
+                    tp_normals_signed.append(constraint.a)
+                else:
+                    tp_normals_signed.append(-constraint.a)
+
+            gamma_set.append(self.general_descent(-average_vector(tp_normals_signed), 'avg touch point'))
+
+            # direction of current center - previous center
+            if previous_center:
+                gamma_set.append(self.general_descent(x_bar - previous_center, 'center - prev center'))
             else:
-                break
-        print('centering_count = ' +str(centering_count) )
+                previous_center = x_bar
 
-        # Step 2.2 in paper, bottom of page 10. Step 3 in whiteboard algorithm.
-        x_bar = x_c_of_alpha
-        self.setIFS(x_bar)
-        # if boundary point, we are optimal (done)
-        if self.ifs.delta == 0:
-            return "done"
+            # now find best direction, adjust with epsilon
+            best = min(gamma_set)
+            epsilon = 0.01
+            new_gamma =  best[1] * (1 - epsilon)
+            direction = best[2]
+            self.setIFS( self.x_hat + new_gamma * direction )
+            near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, best[3])
 
-        # Descent steps
-        # page 11, (a)
-        # Descend in direction of objective function
-        direction = - self.objectiveFunction.c
-        gamma2 = self.general_descent(direction)
+
+        print(self.ifs.x)
         print('stop here')
 
-    def general_descent(self, direction):
+    def general_descent(self, direction, description):
         gamma2 = float("inf")
+        # how far can we go in the given direction?
         for constraint in self.constraints.constraints:
             a_dot_d = np.inner(constraint.a, direction)
             if a_dot_d < 0:
                 gamma2 = min (gamma2, (constraint.b - np.inner(constraint.a, self.x_hat )) / a_dot_d)
         if gamma2 == float("inf"):
             return "Objective function unbounded below"
-        epsilon_descent = 0.1
-        return gamma2 - epsilon_descent
+        return (np.inner(self.objectiveFunction.c, self.x_hat + gamma2 * direction), gamma2, direction, description)
+
 
 
 class Constraint:
@@ -233,7 +279,6 @@ class ObjectiveFunction:
         distance_to_point = (np.inner(self.c, x) - np.inner(self.c, plane_point)) / self.norm
         return x - self.c * distance_to_point / self.norm
 
-
 class TouchPoint:
     def __init__(self, ballCenter, delta, constraint): #, ballBottom, constraints):
         self.ballCenter = ballCenter
@@ -248,7 +293,6 @@ class TouchPoint:
     def __str__(self):
         return 'touchpoint = ' + str(self.touch_point) #+', alpha = ' + str(self.alphaRange)
 
-
 class FeasibleSolution:
     def __init__(self, x_, cons):
         constraints = cons.constraints
@@ -258,16 +302,16 @@ class FeasibleSolution:
         self.delta = min(distances)
         touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist == self.delta]
         self.touchingPoints = [TouchPoint(self.x, self.delta, constraint) for constraint in touching_constraints]
-
+        self.average_direction = average_vector([tp.constraint.a for tp in self.touchingPoints])
     def __str__(self):
         return 'feasible solution:\n x=' + str(self.x) \
             + '\n delta = ' + str(self.delta) \
             + '\n # touching points = '  \
             + '\n'.join([str(tp) for tp in self.touchingPoints])
 
+    @property
     def average_direction_of_touching_constraints(self):
-        return sum([touch_point.constraint.a for touch_point in self.touchingPoints]) / float(len(self.touchingPoints))
-
+        return self.average_direction
 
 class TwoVariableLP:
     # solving max cx s/t ax <= b
