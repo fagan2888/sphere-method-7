@@ -20,7 +20,7 @@ if __name__ == '__main__':
                  ]
     b_input = [ -27, -21, -9, -15, -16, 0, 0]
     A = sp.Constraints([sp.Constraint(a, b) for a, b in zip(A_input, b_input)])
-    c = sp.ObjectiveFunction([-600, -100])
+    c = sp.ObjectiveFunction([-130, -100])
     lp = sp.LinearProgram(A, c)
     # print(lp)
     # print('\n')

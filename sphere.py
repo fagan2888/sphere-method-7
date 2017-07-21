@@ -41,7 +41,7 @@ class LinearProgram:
         return 'Linear Program:\n' + str(self.constraints) + '\n' + str(self.objectiveFunction)
         
     def setIFS(self, x):
-        self.ifs = FeasibleSolution(x, self.constraints)
+        self.ifs = FeasibleSolution(x, self.constraints, self.objectiveFunction)
         self.x_hat_bar = bottom_of_ball(self.ifs, self.objectiveFunction)
 
     def delta_large_enough(self, delta):
@@ -123,7 +123,7 @@ class LinearProgram:
 
             self.x_tilda = self.x_hat_bar + (1 - self.epsilon_step_2_v()) * (x_hat_r2 - self.x_hat_bar)
             if -best_objective_change > self.improvement_threshold_step_2_v:
-                self.ifs = FeasibleSolution(self.x_tilda, self.constraints)
+                self.ifs = FeasibleSolution(self.x_tilda, self.constraints, self.objectiveFunction)
             else:
                 break
 
@@ -134,7 +134,7 @@ class LinearProgram:
             centering_count = 0
             while True:
                 centering_count += 1
-                x_tilda_ifs = FeasibleSolution(self.x_tilda, self.constraints)
+                x_tilda_ifs = FeasibleSolution(self.x_tilda, self.constraints, self.objectiveFunction)
                 y_tilda = bottom_of_ball(x_tilda_ifs, self.objectiveFunction)
                 y_1 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r, y_tilda)
                 y_2 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r2, y_tilda)
@@ -170,14 +170,14 @@ class LinearProgram:
             if self.ifs.delta == 0:
                 return "done"
 
-        # Descent steps, page 11, (a)
+        # Descent steps, page 11, (a).
         if True:
             gamma_set = []
 
             # Descend in direction of objective function
             gamma_set.append(self.general_descent(- self.objectiveFunction.c, 'obj function'))
 
-            # average of collection of orthogonal projections of obj function onto each touch point
+            # Descend in average of collection of orthogonal projections of obj function onto each touch point
             c_i_s = []
             for tp in self.ifs.touchingPoints:
                 constraint = tp.constraint
@@ -187,7 +187,7 @@ class LinearProgram:
 
             gamma_set.append(self.general_descent(- average_vector(c_i_s), 'avg projected obj function'))
 
-            # average of touching point normal vectors (* -1 if vector opposes obj function)
+            # Descend in average of touching point normal vectors (* -1 if vector opposes obj function)
             tp_normals_signed = []
             for tp in self.ifs.touchingPoints:
                 constraint = tp.constraint
@@ -204,6 +204,71 @@ class LinearProgram:
             else:
                 previous_center = x_bar
 
+            # Descent steps D5.1, page 12, (b). Steepest descent parallel to constraint from near touching point.
+            if True:
+                epsilonD5dot1 = 0.1
+                for tp, c_i in zip(self.ifs.touchingPoints, c_i_s):
+                    near_touching_point = (1 - epsilonD5dot1) * tp.touch_point + epsilonD5dot1 * self.x_hat
+                    gamma_set.append(self.general_descent_from_point(near_touching_point, c_i,
+                                                                     'Steepest descent parallel to constraint from near touching point'))
+
+            # Descent steps D5.7, page 12, (b). Find bottom of 2D slice.
+            if True:
+                x_r_2 = None
+                x_r_2 = None
+                max_touch_count = 0
+                max_separation = 0
+                for tp in self.ifs.touchingPoints:
+                    a = []
+                    g = []
+                    dx = self.x_hat_bar - tp.projection_to_objective_plane
+                    for constraint in self.constraints.constraints:
+                        a.append(np.inner(constraint.a, tp.projection_to_objective_plane) - constraint.b)
+                        g.append(np.inner(constraint.a, dx))
+                    alpha_i1, alpha_i2 = subroutine1(a, g)
+
+                    if alpha_i1 == float("-inf") or alpha_i2 == float("inf"):
+                        # Case 1, p 12...skip it for now TODO
+                        print("trouble...not implemented")
+                    else:
+                        # Case 2
+                        x_i_1 = alpha_i1 * self.x_hat_bar + (1 - alpha_i1) * tp.projection_to_objective_plane
+                        x_i_2 = alpha_i2 * self.x_hat_bar + (1 - alpha_i2) * tp.projection_to_objective_plane
+                        # Find set of constraints I2 that are in lower half? TODO
+                        # Count if these x_i touch some constraints
+                        touched_count = 0
+                        tolerance = 0.05
+                        for constraint in self.constraints.constraints:
+                            if constraint.satisfies(x_i_1, tolerance) or constraint.satisfies(x_i_2, tolerance):
+                                touched_count += 1
+
+                        if touched_count >= max_touch_count:
+                            if touched_count > max_touch_count:
+                                separation = np.linalg.norm(x_i_1 - x_i_2)
+                                if separation > max_separation:
+                                    x_r_1 = x_i_1
+                                    x_r_2 = x_i_2
+
+                if x_r_1 is None:
+                    return "Cannot find any endpoints in Case 2"
+                # Solve 2-var LP
+                x_r_2_minus_x_r_1 = x_r_2 - x_r_1
+                # initialize with non-negativity on lambda
+                a = [[0, -1]]
+                b = [0]
+                c = - self.objectiveFunction.c
+                for constraint in self.constraints.constraints:
+                    a.append([-np.inner(constraint.a, x_r_2_minus_x_r_1),
+                              -np.inner(constraint.a, -self.objectiveFunction.c)])
+                    b.append(np.inner(constraint.a, x_r_1) - constraint.b)
+                page14LP = TwoVariableLP(a, b, c)
+                alpha, lamda = page14LP.optimal_solution()
+                descend_to = x_r_1 + alpha * x_r_2_minus_x_r_1 - lamda * self.objectiveFunction.c
+                direction = descend_to - self.x_hat
+                gamma2 = 1
+                obj_value = np.inner(self.objectiveFunction.c, descend_to)
+                gamma_set.append((obj_value, gamma2, direction , 'Descent to best bottom of slice.'))
+
             # now find best direction, adjust with epsilon
             best = min(gamma_set)
             epsilon = 0.01
@@ -211,21 +276,28 @@ class LinearProgram:
             direction = best[2]
             self.setIFS( self.x_hat + new_gamma * direction )
             near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, best[3])
+            print(near_best)
 
 
         print(self.ifs.x)
         print('stop here')
 
-    def general_descent(self, direction, description):
+
+    def general_descent_from_point(self, point, direction, description):
         gamma2 = float("inf")
         # how far can we go in the given direction?
         for constraint in self.constraints.constraints:
             a_dot_d = np.inner(constraint.a, direction)
             if a_dot_d < 0:
-                gamma2 = min (gamma2, (constraint.b - np.inner(constraint.a, self.x_hat )) / a_dot_d)
+                gamma2 = min (gamma2, (constraint.b - np.inner(constraint.a, point )) / a_dot_d)
         if gamma2 == float("inf"):
             return "Objective function unbounded below"
-        return (np.inner(self.objectiveFunction.c, self.x_hat + gamma2 * direction), gamma2, direction, description)
+        return (np.inner(self.objectiveFunction.c, point + gamma2 * direction), gamma2, direction, description)
+
+
+    def general_descent(self, direction, description):
+        return self.general_descent_from_point(self.x_hat, direction, description)
+
 
 
 
@@ -245,6 +317,9 @@ class Constraint:
     
     def project(self, x):
         return x - self.a * self.directedDistanceFrom(x) / self.norm
+
+    def satisfies(self, x, tolerance):
+        return (self.directedDistanceFrom(x) / self.norm) < tolerance
 
 class Constraints:
     def __init__(self, constraints_):
@@ -280,28 +355,30 @@ class ObjectiveFunction:
         return x - self.c * distance_to_point / self.norm
 
 class TouchPoint:
-    def __init__(self, ballCenter, delta, constraint): #, ballBottom, constraints):
+    def __init__(self, ballCenter, delta, constraint, objective_func): #, ballBottom, constraints):
         self.ballCenter = ballCenter
         self.delta = delta #yes, this could be computed, but we presumably already have it
         self.constraint = constraint
         self.touch_point = ballCenter - constraint.a * (constraint.a * ballCenter - constraint.b) / constraint.norm ** 2
+        self.bottom = ballCenter - (self.delta / objective_func.norm) * objective_func.c
+        self.projection_to_objective_plane = self.touch_point - np.multiply(np.transpose(objective_func.c), np.inner(objective_func.c, self.touch_point - self.bottom)) / objective_func.norm_sqd
         # now apply subroutine 1 to get alpha range, which requires a and g as inputs
         # a = constraints.A.dot(self.touchPoint).getA1() - constraints.b
         # g = constraints.A.dot(ballBottom - self.touchPoint).getA1()
         # self.alphaRange = subroutine1(a, g)
-        
+
     def __str__(self):
         return 'touchpoint = ' + str(self.touch_point) #+', alpha = ' + str(self.alphaRange)
 
 class FeasibleSolution:
-    def __init__(self, x_, cons):
+    def __init__(self, x_, cons, objective_function):
         constraints = cons.constraints
         self.x = np.array(x_)
         self.norm =  np.sqrt(np.sum(self.x * self.x))
         distances = [abs(con.directedDistanceFrom(x_)) for con in constraints]
         self.delta = min(distances)
         touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist == self.delta]
-        self.touchingPoints = [TouchPoint(self.x, self.delta, constraint) for constraint in touching_constraints]
+        self.touchingPoints = [TouchPoint(self.x, self.delta, constraint, objective_function) for constraint in touching_constraints]
         self.average_direction = average_vector([tp.constraint.a for tp in self.touchingPoints])
     def __str__(self):
         return 'feasible solution:\n x=' + str(self.x) \
