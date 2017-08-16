@@ -5,7 +5,9 @@ Created on Dec 13, 2016
 '''
 
 import numpy as np
-from gurobipy import *
+from gurobipy import Model, GRB
+
+DEBUG = True
 
 def norm_sqd(x):
     return np.sum(x * x)
@@ -30,12 +32,15 @@ def bottom_of_ball(ifs, objective_function):
 def average_vector(vectors):
    return sum(vectors) / float(len(vectors))
 
+def logResult(result):
+    if DEBUG:
+        print('DEBUG: ' + str(result))
 
 class LinearProgram:
     def __init__(self, constraints, objectiveFunction):
         self.constraints = constraints
         self.objectiveFunction = objectiveFunction
-        self._improvement_threshold_step_2_v = 0.1
+        # self._improvement_threshold_step_2_v =
 
     def __str__(self):
         return 'Linear Program:\n' + str(self.constraints) + '\n' + str(self.objectiveFunction)
@@ -45,7 +50,9 @@ class LinearProgram:
         self.x_hat_bar = bottom_of_ball(self.ifs, self.objectiveFunction)
 
     def delta_large_enough(self, delta):
-        return delta > float("inf")
+ # TODO
+ #  delta > float("inf")
+        return True
 
     @property
     def delta_x_hat(self):
@@ -63,23 +70,30 @@ class LinearProgram:
 
     @property
     def improvement_threshold_step_2_v(self):
-        return self._improvement_threshold_step_2_v
+        # return self._improvement_threshold_step_2_v
+        # TODO
+        return 0.05 * abs(np.inner(self.objectiveFunction.c, self.x_hat_bar))
 
-    @improvement_threshold_step_2_v.setter
-    def improvement_threshold_step_2_v(self, value):
-        if value <= 0:
-            raise ValueError("The improvement threshold should be greater than zero.")
-        else:
-            self._improvement_threshold_step_2_v = value
+    # @improvement_threshold_step_2_v.setter
+    # def improvement_threshold_step_2_v(self, value):
+    #     if value <= 0:
+    #         raise ValueError("The improvement threshold should be greater than zero.")
+    #     else:
+    #         self._improvement_threshold_step_2_v = value
 
     def solve(self):
         # start with centering step (p. 5, section 2.1)
+        centeringStepCount = 0
         while True:
+            logResult('Centering step # ' + str(centeringStepCount) + '...')
+            centeringStepCount += 1
+            logResult('IFS = ' + str(self.ifs))
 
             # Begin Step2 (Centering Step)
             delta_prev = 0
             if not self.delta_large_enough(self.delta_x_hat):
                 # 2ii: implementation detail page 6
+                logResult("delta_x_hat = " + str(self.delta_x_hat) +", executing implementation detail")
                 d0 = self.ifs.average_direction_of_touching_constraints
                 d00 = d0 - self.objectiveFunction.c * (np.dot(self.objectiveFunction.c, d0) / self.objectiveFunction.norm_sqd)
                 #now solve 2-var LP
@@ -88,17 +102,19 @@ class LinearProgram:
                 c = [1, 0]
                 two_var_LP  = TwoVariableLP(a, b, c)
                 self.imp_detail_delta, self.imp_detail_alpha = two_var_LP.optimal_solution()
+                logResult('In Centering, delta, alpha = ' + str(self.ifs.x) )
                 alpha = self.imp_detail_alpha
                 self.setIFS(self.ifs.x + alpha * d00)
+            logResult('x_hat_bar = ' + str(self.x_hat_bar))
             delta = self.ifs.delta
             if delta == 0:
                 return 'Finished at step 2iii. '
             # 2. Substep Continued, page 6, our step 2iii
             # Get T(x_hat), x_hat_bar,  x_hat_bar_i for each touch point
-            # touch_points = self.ifs.touchingPoints
-            # self.x_hat_bar_i = [ self.objectiveFunction.project_point_to_plane_through_another_point(tp.touch_point, self.x_hat_bar) for tp in self.ifs.touchingPoints]
-            # Step 2 iv
-            # iterate over touch points, using Subroutine 1 to find all ranges of alphas
+            touch_points = self.ifs.touchingPoints
+            self.x_hat_bar_i = [ self.objectiveFunction.project_point_to_plane_through_another_point(tp.touch_point, self.x_hat_bar) for tp in self.ifs.touchingPoints]
+
+            # Step 2 iv, iterate over touch points, using Subroutine 1 to find all ranges of alphas
             alpha_i2s = []
             for tp in self.ifs.touchingPoints:
                 a = []
@@ -115,15 +131,20 @@ class LinearProgram:
             best_objective_change = None
             for tp, alpha_i2 in zip(self.ifs.touchingPoints, alpha_i2s):
                 x_hat_i2 = alpha_i2 * self.x_hat_bar + (1 - alpha_i2) * tp.touch_point
+                logResult('x_hat_i2 = ' + str(x_hat_i2))
                 objective_change = np.inner(x_hat_i2, self.objectiveFunction.c) - objective_at_x_hat_bar
                 if not best_objective_change or objective_change < best_objective_change:
                     best_objective_change = objective_change
                     x_hat_r2 = x_hat_i2
                     x_hat_r = tp.touch_point
 
-            self.x_tilda = self.x_hat_bar + (1 - self.epsilon_step_2_v()) * (x_hat_r2 - self.x_hat_bar)
+            logResult("x_hat_r2 = " + str(x_hat_r2))
+            logResult("x_hat_r = " + str(x_hat_r))
+            self.x_tilde = self.x_hat_bar + (1 - self.epsilon_step_2_v()) * (x_hat_r2 - self.x_hat_bar)
+            logResult("x_tilde = " + str( self.x_tilde))
+            logResult("improvement = " + str(-best_objective_change))
             if -best_objective_change > self.improvement_threshold_step_2_v:
-                self.ifs = FeasibleSolution(self.x_tilda, self.constraints, self.objectiveFunction)
+                self.setIFS(self.x_tilde)
             else:
                 break
 
@@ -134,10 +155,10 @@ class LinearProgram:
             centering_count = 0
             while True:
                 centering_count += 1
-                x_tilda_ifs = FeasibleSolution(self.x_tilda, self.constraints, self.objectiveFunction)
-                y_tilda = bottom_of_ball(x_tilda_ifs, self.objectiveFunction)
-                y_1 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r, y_tilda)
-                y_2 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r2, y_tilda)
+                x_tilde_ifs = FeasibleSolution(self.x_tilde, self.constraints, self.objectiveFunction)
+                y_tilde = bottom_of_ball(x_tilde_ifs, self.objectiveFunction)
+                y_1 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r, y_tilde)
+                y_2 = self.objectiveFunction.project_point_to_plane_through_another_point(x_hat_r2, y_tilde)
                 # use subroutine 1 to find feasible range of alphas connecting y_1 and y_2
                 dy = y_2 - y_1
                 a = [np.inner(con.a, y_1) - con.b for con in self.constraints.constraints]
@@ -359,7 +380,8 @@ class TouchPoint:
         self.ballCenter = ballCenter
         self.delta = delta #yes, this could be computed, but we presumably already have it
         self.constraint = constraint
-        self.touch_point = ballCenter - constraint.a * (constraint.a * ballCenter - constraint.b) / constraint.norm ** 2
+        constraint_scalar = (np.inner(constraint.a, ballCenter) - constraint.b) / constraint.norm_sqd
+        self.touch_point = ballCenter - constraint.a * constraint_scalar
         self.bottom = ballCenter - (self.delta / objective_func.norm) * objective_func.c
         self.projection_to_objective_plane = self.touch_point - np.multiply(np.transpose(objective_func.c), np.inner(objective_func.c, self.touch_point - self.bottom)) / objective_func.norm_sqd
         # now apply subroutine 1 to get alpha range, which requires a and g as inputs
@@ -377,14 +399,16 @@ class FeasibleSolution:
         self.norm =  np.sqrt(np.sum(self.x * self.x))
         distances = [abs(con.directedDistanceFrom(x_)) for con in constraints]
         self.delta = min(distances)
-        touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist == self.delta]
-        self.touchingPoints = [TouchPoint(self.x, self.delta, constraint, objective_function) for constraint in touching_constraints]
+        self.touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist == self.delta]
+        self.touchingPoints = [TouchPoint(self.x, self.delta, constraint, objective_function) for constraint in self.touching_constraints]
         self.average_direction = average_vector([tp.constraint.a for tp in self.touchingPoints])
     def __str__(self):
         return 'feasible solution:\n x=' + str(self.x) \
             + '\n delta = ' + str(self.delta) \
-            + '\n # touching points = '  \
-            + '\n'.join([str(tp) for tp in self.touchingPoints])
+            + '\n touching points: '  \
+            + '\n'.join([str(tp) for tp in self.touchingPoints])\
+               + '\n touching constraints: ' \
+               + '\n'.join([str(tc) for tc in self.touching_constraints])
 
     @property
     def average_direction_of_touching_constraints(self):
@@ -401,6 +425,7 @@ class TwoVariableLP:
 
     def optimal_solution(self):
         m = Model("lp")
+        m.setParam('OutputFlag', 0)
         # Create variables
         x = m.addVar(vtype=GRB.CONTINUOUS, name="x")
         y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
