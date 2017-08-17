@@ -293,17 +293,18 @@ class LinearProgram:
                 direction = descend_to - self.x_hat
                 gamma2 = 1
                 obj_value = np.inner(self.objectiveFunction.c, descend_to)
-                gamma_set.append((obj_value, gamma2, direction , 'Descent to best bottom of slice.'))
+                gamma_set.append((obj_value, gamma2, self.x_hat, direction , 'Descent to best bottom of slice.'))
 
             # now find best direction, adjust with epsilon_for_gamma
             best = min(gamma_set)
-            logResult("best uses " + best[3])
+            method_used = best[4]
+            logResult("best uses " + method_used)
             epsilon_for_gamma = 0.001
             new_gamma =  best[1] * (1 - epsilon_for_gamma)
-            direction = best[2]
-            self.setIFS( self.x_hat + new_gamma * direction )
-            near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, best[3])
-
+            direction = best[3]
+            from_point  = best[2]
+            self.setIFS( from_point + new_gamma * direction )
+            near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, method_used)
 
         logResult("ifs: " + str(self.ifs.x))
         print('Solving complete')
@@ -318,7 +319,7 @@ class LinearProgram:
                 gamma2 = min (gamma2, (constraint.b - np.inner(constraint.a, point )) / a_dot_d)
         if gamma2 == float("inf"):
             return "Objective function unbounded below"
-        return (np.inner(self.objectiveFunction.c, point + gamma2 * direction), gamma2, direction, description)
+        return (np.inner(self.objectiveFunction.c, point + gamma2 * direction), gamma2, point, direction, description)
 
 
     def general_descent(self, direction, description):
