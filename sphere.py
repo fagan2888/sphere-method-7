@@ -70,24 +70,19 @@ class LinearProgram:
         return 0.1
 
     @property
+    def max_centering_steps(self):
+        return 1
+
+    @property
     def improvement_threshold_step_2_v(self):
-        # return self._improvement_threshold_step_2_v
         # TODO
         return 0.05 * abs(np.inner(self.objectiveFunction.c, self.x_hat_bar))
 
-    # @improvement_threshold_step_2_v.setter
-    # def improvement_threshold_step_2_v(self, value):
-    #     if value <= 0:
-    #         raise ValueError("The improvement threshold should be greater than zero.")
-    #     else:
-    #         self._improvement_threshold_step_2_v = value
-
     def solve(self):
         # start with centering step (p. 5, section 2.1)
-        centeringStepCount = 0
+        centering_count = 0
         while True:
-            logResult('Centering step # ' + str(centeringStepCount) + '...')
-            centeringStepCount += 1
+            logResult('Centering step # ' + str(centering_count) + '...')
             logResult('IFS = ' + str(self.ifs))
 
             # Begin Step2 (Centering Step)
@@ -155,7 +150,6 @@ class LinearProgram:
                 if True:
                     previous_center = None
                     previous_opt_delta = float("-inf")
-                    centering_count = 0
                     centering_count += 1
                     x_tilde_ifs = FeasibleSolution(self.x_tilde, self.constraints, self.objectiveFunction)
                     y_tilde = bottom_of_ball(x_tilde_ifs, self.objectiveFunction)
@@ -185,15 +179,15 @@ class LinearProgram:
                     x_c_of_alpha = opt_alpha * y_2 + (1 - opt_alpha) * y_1
                     self.setIFS(x_c_of_alpha)
                     logResult("x_c_of_alpha = " + str(x_c_of_alpha))
+                    logResult("delta = " + str(self.delta_x_hat))
 
                     # TODO: per page 10, last para of Approach 2, could continue
                     # if objective improving at "good rate"
-                    if opt_delta > previous_opt_delta:
+                    if opt_delta > previous_opt_delta and centering_count < self.max_centering_steps:
                         previous_opt_delta = opt_delta
                     else:
                         break
-
-        print('centering_count = ' + str(centering_count) )
+        print('Final centering_count = ' + str(centering_count) )
 
         # Step 2.2 in paper, bottom of page 10. Step 3 in whiteboard algorithm.
         x_bar = x_c_of_alpha
@@ -203,7 +197,7 @@ class LinearProgram:
 
         # Descent steps, page 11, (a).
         if True:
-            logResult("Descending!!!!")
+            logResult("Beginning Descent, starting from objective value = " + str(self.objectiveFunction.x(self.ifs.x)))
             gamma_set = []
 
             # Descend in direction of objective function
@@ -213,8 +207,7 @@ class LinearProgram:
             c_i_s = []
             for tp in self.ifs.touchingPoints:
                 constraint = tp.constraint
-                c_i = self.objectiveFunction.c \
-                      - constraint.a * (np.inner(constraint.a, self.objectiveFunction.c)/constraint.norm)
+                c_i = self.objectiveFunction.c - constraint.a * ((np.inner(constraint.a, self.objectiveFunction.c)/constraint.norm_sqd))
                 c_i_s.append(c_i)
 
             gamma_set.append(self.general_descent(- average_vector(c_i_s), 'avg projected obj function'))
@@ -223,7 +216,7 @@ class LinearProgram:
             tp_normals_signed = []
             for tp in self.ifs.touchingPoints:
                 constraint = tp.constraint
-                if np.inner(constraint.a, self.objectiveFunction.c) < 0:
+                if np.inner(constraint.a, self.objectiveFunction.c) > 0:
                     tp_normals_signed.append(constraint.a)
                 else:
                     tp_normals_signed.append(-constraint.a)
@@ -238,14 +231,15 @@ class LinearProgram:
 
             # Descent steps D5.1, page 12, (b). Steepest descent parallel to constraint from near touching point.
             if True:
-                epsilonD5dot1 = 0.1
+                epsilonD5dot1 = 0.001
                 for tp, c_i in zip(self.ifs.touchingPoints, c_i_s):
                     near_touching_point = (1 - epsilonD5dot1) * tp.touch_point + epsilonD5dot1 * self.x_hat
-                    gamma_set.append(self.general_descent_from_point(near_touching_point, c_i,
+                    gamma_set.append(self.general_descent_from_point(near_touching_point, -c_i,
                                                                      'Steepest descent parallel to constraint from near touching point'))
+                    logResult("D5.1 touch_point constraint = " + str(tp.constraint))
 
             # Descent steps D5.7, page 12, (b). Find bottom of 2D slice.
-            if False:
+            if True:
                 x_r_2 = None
                 x_r_2 = None
                 max_touch_count = 0
@@ -301,17 +295,17 @@ class LinearProgram:
                 obj_value = np.inner(self.objectiveFunction.c, descend_to)
                 gamma_set.append((obj_value, gamma2, direction , 'Descent to best bottom of slice.'))
 
-            # now find best direction, adjust with epsilon
+            # now find best direction, adjust with epsilon_for_gamma
             best = min(gamma_set)
-            epsilon = 0.01
-            new_gamma =  best[1] * (1 - epsilon)
+            logResult("best uses " + best[3])
+            epsilon_for_gamma = 0.001
+            new_gamma =  best[1] * (1 - epsilon_for_gamma)
             direction = best[2]
             self.setIFS( self.x_hat + new_gamma * direction )
             near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, best[3])
-            print(near_best)
 
 
-        print(self.ifs.x)
+        logResult("ifs: " + str(self.ifs.x))
         print('Solving complete')
 
 
@@ -382,6 +376,9 @@ class ObjectiveFunction:
     def __repr__(self):
         return 'minimize ' + str(self.c) + 'x'
 
+    def x(self, x):
+        return np.inner(self.c, x)
+
     def project_point_to_plane_through_another_point(self, x, plane_point):
         distance_to_point = (np.inner(self.c, x) - np.inner(self.c, plane_point)) / self.norm
         return x - self.c * distance_to_point / self.norm
@@ -410,7 +407,7 @@ class FeasibleSolution:
         self.norm =  np.sqrt(np.sum(self.x * self.x))
         distances = [abs(con.directedDistanceFrom(x_)) for con in constraints]
         self.delta = min(distances)
-        self.touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist == self.delta]
+        self.touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist / self.delta < 1.000001]
         self.touchingPoints = [TouchPoint(self.x, self.delta, constraint, objective_function) for constraint in self.touching_constraints]
         self.average_direction = average_vector([tp.constraint.a for tp in self.touchingPoints])
     def __repr__(self):
