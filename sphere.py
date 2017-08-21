@@ -196,7 +196,8 @@ class LinearProgram:
             return "done"
 
         # Descent steps, page 11, (a).
-        if True:
+        previous_center = None
+        for descent_counter in range(3):
             logResult("Beginning Descent, starting from objective value = " + str(self.objectiveFunction.x(self.ifs.x)))
             gamma_set = []
 
@@ -224,10 +225,10 @@ class LinearProgram:
             gamma_set.append(self.general_descent(-average_vector(tp_normals_signed), 'avg touch point'))
 
             # direction of current center - previous center
-            if previous_center:
-                gamma_set.append(self.general_descent(x_bar - previous_center, 'center - prev center'))
-            else:
-                previous_center = x_bar
+            # if previous_center is None:
+            #     previous_center = x_bar
+            # else:
+            #     gamma_set.append(self.general_descent(x_bar - previous_center, 'center - prev center'))
 
             # Descent steps D5.1, page 12, (b). Steepest descent parallel to constraint from near touching point.
             if True:
@@ -295,16 +296,23 @@ class LinearProgram:
                 obj_value = np.inner(self.objectiveFunction.c, descend_to)
                 gamma_set.append((obj_value, gamma2, self.x_hat, direction , 'Descent to best bottom of slice.'))
 
+
+            # for debug, display entire gamma
+            for gamma in gamma_set:
+                logResult("gamma method " + str(gamma[4]) + " starts from " + str(gamma[2]) + " in direction " + str(gamma[3]))
+
             # now find best direction, adjust with epsilon_for_gamma
             best = min(gamma_set)
             method_used = best[4]
             logResult("best uses " + method_used)
+            logResult("starting from " + str(best[2]))
+            logResult("direction = " + str(best[3]))
             epsilon_for_gamma = 0.001
             new_gamma =  best[1] * (1 - epsilon_for_gamma)
             direction = best[3]
             from_point  = best[2]
             self.setIFS( from_point + new_gamma * direction )
-            near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, method_used)
+            # near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, method_used)
 
         logResult("ifs: " + str(self.ifs.x))
         print('Solving complete')
@@ -408,6 +416,9 @@ class FeasibleSolution:
         self.norm =  np.sqrt(np.sum(self.x * self.x))
         distances = [abs(con.directedDistanceFrom(x_)) for con in constraints]
         self.delta = min(distances)
+        if self.delta == 0.0:
+            print("This doesn't look like an interior point!")
+            raise ValueError
         self.touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist / self.delta < 1.000001]
         self.touchingPoints = [TouchPoint(self.x, self.delta, constraint, objective_function) for constraint in self.touching_constraints]
         self.average_direction = average_vector([tp.constraint.a for tp in self.touchingPoints])
@@ -444,6 +455,37 @@ class TwoVariableLP:
         p = 1
         for a, b in zip(self.a, self.b):
             m.addConstr(x * a[0] + y * a[1] <= b, "c"+str(p))
+            p += 1
+        m.optimize()
+        vars = m.getVars()
+        if vars:
+            return [v.x for v in vars]
+        else:
+            raise ValueError
+
+
+class ThreeVariableMinGreaterThanLP:
+    # solving min cx s/t ax >= b
+    # a is a list of 3-element lists of floats (the rows)
+    # b, c is a list of floats
+    def __init__(self, a, b, c):
+        self.a = a
+        self.b = b
+        self.c = c
+
+    def optimal_solution(self):
+        m = Model("lp")
+        m.setParam('OutputFlag', 0)
+        # Create variables
+        x = m.addVar(vtype=GRB.CONTINUOUS, name="x")
+        y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
+        z = m.addVar(vtype=GRB.CONTINUOUS, name="z")
+        # Set objective
+        m.setObjective(x * self.c[0] + y * self.c[1] + z * self.c[2], GRB.MINIMIZE)
+
+        p = 1
+        for a, b in zip(self.a, self.b):
+            m.addConstr(x * a[0] + y * a[1] + z * a[2] >= b, "c"+str(p))
             p += 1
         m.optimize()
         vars = m.getVars()
