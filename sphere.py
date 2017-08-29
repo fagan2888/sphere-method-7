@@ -79,7 +79,7 @@ class LinearProgram:
         return 0.05 * abs(np.inner(self.objectiveFunction.c, self.x_hat_bar))
 
     def solve(self):
-        for descent_counter in range(3):
+        for descent_counter in range(10):
             # start with centering step (p. 5, section 2.1)
             centering_count = 0
             while True:
