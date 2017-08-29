@@ -87,7 +87,7 @@ def petesSimple3D():
 
 if __name__ == '__main__':
     # davidsTwoVarLP()
-    davids3DThatFailedInCPlusPlus()
-    # petesSimple3D()
+    # davids3DThatFailedInCPlusPlus()
+    petesSimple3D()
     # davids_random_LP(5, 3)
 

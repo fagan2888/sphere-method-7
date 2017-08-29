@@ -79,7 +79,9 @@ class LinearProgram:
         return 0.05 * abs(np.inner(self.objectiveFunction.c, self.x_hat_bar))
 
     def solve(self):
-        for descent_counter in range(10):
+        stopping_epsilon = 0.001
+        previous_objective_value = float("inf")
+        while True:
             # start with centering step (p. 5, section 2.1)
             centering_count = 0
             while True:
@@ -316,6 +318,11 @@ class LinearProgram:
             direction = best[3]
             from_point  = best[2]
             self.setIFS( from_point + new_gamma * direction )
+            objective_value = np.inner(self.objectiveFunction.c, self.ifs.x)
+            print('objective_value = ' + str(objective_value))
+            if previous_objective_value - objective_value < stopping_epsilon:
+                break
+            previous_objective_value = objective_value
             # near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, method_used)
 
         logResult("ifs: " + str(self.ifs.x))
