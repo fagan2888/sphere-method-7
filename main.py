@@ -63,8 +63,9 @@ def davids_random_LP(num_rows, num_cols):
     c_input = np.random.rand(num_cols)
     c = sp.ObjectiveFunction(c_input)
     lp = sp.LinearProgram(A, c)
-    lp.setIFS([0] * num_cols)
+    lp.setIFS([10] * num_cols)
     lp.solve()
+    # print("Gurobi solution = " + str(sp.ThreeVariableMinGreaterThanLP(A_input, b_input, c_input).optimal_solution()))
 
 
 def petesSimple3D():
@@ -88,6 +89,7 @@ def petesSimple3D():
 if __name__ == '__main__':
     # davidsTwoVarLP()
     # davids3DThatFailedInCPlusPlus()
-    petesSimple3D()
-    # davids_random_LP(5, 3)
+    # petesSimple3D()
+
+    davids_random_LP(5, 3)
 

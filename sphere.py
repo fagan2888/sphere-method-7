@@ -13,13 +13,14 @@ def norm_sqd(x):
     return np.sum(x * x)
 
 def subroutine1(a, g):
+    TINY = 1e-6
     # return a 2-tuple that represents range of values satisfying all a-g inequalities
     v1 = float("-inf")
-    v1_ratios = [ -float(a_t) / g_t for a_t, g_t in zip(a,g) if g_t > 0]
+    v1_ratios = [ -float(a_t) / g_t for a_t, g_t in zip(a,g) if g_t > TINY ]
     if v1_ratios:
         v1 = max(v1_ratios)
     v2 = float("inf")
-    v2_ratios = [ (-float(a_t) / g_t) for a_t, g_t in zip(a,g) if g_t < 0]
+    v2_ratios = [ (-float(a_t) / g_t) for a_t, g_t in zip(a,g) if g_t < -TINY]
     if v2_ratios:
         v2 = min(v2_ratios)
     if v1 > v2:
@@ -365,7 +366,7 @@ class Constraint:
         return x - self.a * self.directedDistanceFrom(x) / self.norm
 
     def satisfies(self, x, tolerance):
-        return (self.directedDistanceFrom(x) / self.norm) < tolerance
+        return np.inner(self.a, x) >= self.b
 
 class Constraints:
     def __init__(self, constraints_):
@@ -378,6 +379,7 @@ class Constraints:
         for con in self.constraints:
             s += '\n' + str(con)
         return s
+
     #
     # def deltaAndTouchingConstraints(self, ifs):
     #     distances = [con.directedDistanceFrom(ifs.x) for con in self.constraints]
@@ -424,6 +426,10 @@ class FeasibleSolution:
     def __init__(self, x_, cons, objective_function):
         constraints = cons.constraints
         self.x = np.array(x_)
+        for constraint in constraints:
+            if not constraint.satisfies(self.x, 0):
+                print("This doesn't look like a feasible point!")
+                raise ValueError
         self.norm =  np.sqrt(np.sum(self.x * self.x))
         distances = [abs(con.directedDistanceFrom(x_)) for con in constraints]
         self.delta = min(distances)
@@ -505,4 +511,34 @@ class ThreeVariableMinGreaterThanLP:
         else:
             raise ValueError
 
+
+class GurobiLP:
+    # solving min cx s/t ax >= b
+    # a is a list of lists of floats (the rows)
+    # b, c is a list of floats
+    def __init__(self, a, b, c):
+        self.a = a
+        self.b = b
+        self.c = c
+
+    def optimal_solution(self):
+        m = Model("lp")
+        m.setParam('OutputFlag', 0)
+        # Create variables
+        x = m.addVar(vtype=GRB.CONTINUOUS, name="x")
+        y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
+        z = m.addVar(vtype=GRB.CONTINUOUS, name="z")
+        # Set objective
+        m.setObjective(x * self.c[0] + y * self.c[1] + z * self.c[2], GRB.MINIMIZE)
+
+        p = 1
+        for a, b in zip(self.a, self.b):
+            m.addConstr(x * a[0] + y * a[1] + z * a[2] >= b, "c"+str(p))
+            p += 1
+        m.optimize()
+        vars = m.getVars()
+        if vars:
+            return [v.x for v in vars]
+        else:
+            raise ValueError
 
