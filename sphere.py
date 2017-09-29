@@ -5,7 +5,7 @@ Created on Dec 13, 2016
 '''
 
 import numpy as np
-from gurobipy import Model, GRB
+from gurobipy import Model, GRB, GurobiError
 
 DEBUG = True
 
@@ -248,7 +248,7 @@ class LinearProgram:
 
             # Descent steps D5.7, page 12, (b). Find bottom of 2D slice.
             if True:
-                x_r_2 = None
+                x_r_1 = None
                 x_r_2 = None
                 max_touch_count = 0
                 max_separation = 0
@@ -328,6 +328,7 @@ class LinearProgram:
 
         logResult("ifs: " + str(self.ifs.x))
         print('Solving complete')
+        return self.ifs.x
 
 
     def general_descent_from_point(self, point, direction, description):
@@ -464,8 +465,8 @@ class TwoVariableLP:
         m = Model("lp")
         m.setParam('OutputFlag', 0)
         # Create variables
-        x = m.addVar(vtype=GRB.CONTINUOUS, name="x")
-        y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
+        x = m.addVar(lb=-GRB.INFINITY, vtype=GRB.CONTINUOUS, name="x")
+        y = m.addVar(lb=-GRB.INFINITY, vtype=GRB.CONTINUOUS, name="y")
         # Set objective
         m.setObjective(x * self.c[0] + y * self.c[1], GRB.MAXIMIZE)
 
@@ -476,7 +477,10 @@ class TwoVariableLP:
         m.optimize()
         vars = m.getVars()
         if vars:
-            return [v.x for v in vars]
+            try:
+                return [v.x for v in vars]
+            except:
+                raise ValueError
         else:
             raise ValueError
 
@@ -489,56 +493,75 @@ class ThreeVariableMinGreaterThanLP:
         self.a = a
         self.b = b
         self.c = c
+        self.optimal_x = []
 
     def optimal_solution(self):
+        if self.optimal_x:
+            return self.optimal_x
         m = Model("lp")
         m.setParam('OutputFlag', 0)
         # Create variables
-        x = m.addVar(vtype=GRB.CONTINUOUS, name="x")
-        y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
-        z = m.addVar(vtype=GRB.CONTINUOUS, name="z")
+        lower_bound = -GRB.INFINITY
+        x1 = m.addVar(lb=lower_bound, vtype=GRB.CONTINUOUS, name="x1")
+        x2 = m.addVar(lb=lower_bound, vtype=GRB.CONTINUOUS, name="x2")
+        x3 = m.addVar(lb=lower_bound, vtype=GRB.CONTINUOUS, name="x3")
         # Set objective
-        m.setObjective(x * self.c[0] + y * self.c[1] + z * self.c[2], GRB.MINIMIZE)
+        m.setObjective(x1 * self.c[0] + x2 * self.c[1] + x3 * self.c[2], GRB.MINIMIZE)
 
         p = 1
         for a, b in zip(self.a, self.b):
-            m.addConstr(x * a[0] + y * a[1] + z * a[2] >= b, "c"+str(p))
+            m.addConstr(x1 * a[0] + x2 * a[1] + x3 * a[2] >= b, "c"+str(p))
             p += 1
         m.optimize()
         vars = m.getVars()
         if vars:
-            return [v.x for v in vars]
+            result = None
+            try:
+                result = [v.x for v in vars]
+            except GurobiError:
+                print("Unable to retrieve optimum values, so optimum may not exist.")
+            return result
         else:
             raise ValueError
+        return self.optimal_x
+
+    def objective_value(self):
+        return np.inner(self.c, self.optimal_solution())
 
 
-class GurobiLP:
-    # solving min cx s/t ax >= b
-    # a is a list of lists of floats (the rows)
-    # b, c is a list of floats
-    def __init__(self, a, b, c):
-        self.a = a
-        self.b = b
-        self.c = c
-
-    def optimal_solution(self):
-        m = Model("lp")
-        m.setParam('OutputFlag', 0)
-        # Create variables
-        x = m.addVar(vtype=GRB.CONTINUOUS, name="x")
-        y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
-        z = m.addVar(vtype=GRB.CONTINUOUS, name="z")
-        # Set objective
-        m.setObjective(x * self.c[0] + y * self.c[1] + z * self.c[2], GRB.MINIMIZE)
-
-        p = 1
-        for a, b in zip(self.a, self.b):
-            m.addConstr(x * a[0] + y * a[1] + z * a[2] >= b, "c"+str(p))
-            p += 1
-        m.optimize()
-        vars = m.getVars()
-        if vars:
-            return [v.x for v in vars]
-        else:
-            raise ValueError
-
+# class GurobiThreeVarLP:
+#     # solving min cx s/t ax >= b
+#     # a is a list of lists of floats (the rows)
+#     # b, c is a list of floats
+#     def __init__(self, a, b, c):
+#         self.a = a
+#         self.b = b
+#         self.c = c
+#         self.optimal_x = []
+#
+#     def optimal_solution(self):
+#         if self.optimal_x:
+#             return self.optimal_x
+#         m = Model("lp")
+#         m.setParam('OutputFlag', 0)
+#         # Create variables
+#         x = m.addVar(vtype=GRB.CONTINUOUS, name="x")
+#         y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
+#         z = m.addVar(vtype=GRB.CONTINUOUS, name="z")
+#         # Set objective
+#         m.setObjective(x * self.c[0] + y * self.c[1] + z * self.c[2], GRB.MINIMIZE)
+#
+#         p = 1
+#         for a, b in zip(self.a, self.b):
+#             m.addConstr(x * a[0] + y * a[1] + z * a[2] >= b, "c"+str(p))
+#             p += 1
+#         m.optimize()
+#         vars = m.getVars()
+#         if vars:
+#             self.optimal_x = [v.x for v in vars]
+#         else:
+#             raise ValueError
+#         return self.optimal_x
+#
+#     def objective_value(self):
+#         return np.inner(self.c, self.optimal_solution())

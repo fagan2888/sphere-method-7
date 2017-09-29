@@ -56,16 +56,32 @@ def davids3DThatFailedInCPlusPlus():
     print("Gurobi solution = " + str(sp.ThreeVariableMinGreaterThanLP(A_input, b_input, c_input).optimal_solution()))
 
 def davids_random_LP(num_rows, num_cols):
-    A_input = np.random.rand(num_rows, num_cols)
-
-    b_input = np.random.rand(num_rows)
+    A_input = np.random.rand(num_rows + 2 * num_cols, num_cols)
+    b_input = -np.random.rand(num_rows + 2 * num_cols)
+    # add lower and upper bound of box
+    for col in range(num_cols):
+        row = [0] * num_cols
+        row[col] = 1
+        A_input[num_rows + 2 * col] = row
+        row[col] = -1
+        A_input[num_rows + 2 * col + 1] = row
     A = sp.Constraints([sp.Constraint(a, b) for a, b in zip(A_input, b_input)])
     c_input = np.random.rand(num_cols)
     c = sp.ObjectiveFunction(c_input)
     lp = sp.LinearProgram(A, c)
-    lp.setIFS([10] * num_cols)
-    lp.solve()
-    # print("Gurobi solution = " + str(sp.ThreeVariableMinGreaterThanLP(A_input, b_input, c_input).optimal_solution()))
+    lp.setIFS([0] * num_cols)
+    print(lp)
+    gurobi_problem = sp.ThreeVariableMinGreaterThanLP(A_input, b_input, c_input)
+    print("Gurobi solution = " + str(gurobi_problem.optimal_solution()))
+    gurValue = gurobi_problem.objective_value()
+    print("Gurobi obj value = " + str(gurValue))
+    answer = lp.solve()
+    print("Sphere7 solution = " + str(answer))
+    sph7Value = np.inner(answer, c_input)
+    print("Sphere7 obj value = " + str(sph7Value))
+    diff = sph7Value - gurValue
+    print("Diff obj value = " + str(diff))
+    print("Diff obj % = " + str(100 * diff / abs(gurValue)))
 
 
 def petesSimple3D():
@@ -90,6 +106,6 @@ if __name__ == '__main__':
     # davidsTwoVarLP()
     # davids3DThatFailedInCPlusPlus()
     # petesSimple3D()
-
+    np.random.seed(13)
     davids_random_LP(5, 3)
 
