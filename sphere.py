@@ -5,9 +5,9 @@ Created on Dec 13, 2016
 '''
 
 import numpy as np
-from gurobipy import Model, GRB, GurobiError
+from gurobipy import Model, GRB, GurobiError, LinExpr
 
-DEBUG = True
+DEBUG = False
 
 def norm_sqd(x):
     return np.sum(x * x)
@@ -68,7 +68,8 @@ class LinearProgram:
         return self.x_hat_bar
 
     def epsilon_step_2_v(self):
-        return 0.1
+        #previously using 0.1
+        return 1.0e-2
 
     @property
     def max_centering_steps(self):
@@ -92,7 +93,7 @@ class LinearProgram:
                 # Begin Step2 (Centering Step)
                 delta_prev = 0
                 if not self.delta_large_enough(self.delta_x_hat):
-                    # TODO Not executing yet, because delta is always large enough
+                    # TODO Always executing by pretending delta is never large enough at outset
                     # 2ii: implementation detail page 6
                     logResult("delta_x_hat = " + str(self.delta_x_hat) + ", executing implementation detail")
                     d0 = self.ifs.average_direction_of_touching_constraints
@@ -129,7 +130,8 @@ class LinearProgram:
                          self.constraints.constraints]
                     alpha_range = subroutine1(a, g)
                     if alpha_range[1] == float("inf"):
-                        return 'solution diverges to -infinity'
+                        #TODO Are we done here? Is this an actual error or a numerical precision issue?
+                        return 'solution diverges to -infinity in subroutine1'
                     alpha_i2s.append(alpha_range[1])
                 objective_at_x_hat_bar = np.inner(self.x_hat_bar, self.objectiveFunction.c)
 
@@ -146,6 +148,7 @@ class LinearProgram:
 
                 logResult("x_hat_r2 = " + str(x_hat_r2))
                 logResult("x_hat_r = " + str(x_hat_r))
+
                 self.x_tilde = self.x_hat_bar + (1 - self.epsilon_step_2_v()) * (x_hat_r2 - self.x_hat_bar)
                 logResult("x_tilde = " + str(self.x_tilde))
                 logResult("improvement = " + str(-best_objective_change))
@@ -195,7 +198,7 @@ class LinearProgram:
                             previous_opt_delta = opt_delta
                         else:
                             break
-            print('Final centering_count = ' + str(centering_count))
+            logResult('Final centering_count = ' + str(centering_count))
 
             # Step 2.2 in paper, bottom of page 10. Step 3 in whiteboard algorithm.
             x_bar = x_c_of_alpha
@@ -263,7 +266,7 @@ class LinearProgram:
 
                     if alpha_i1 == float("-inf") or alpha_i2 == float("inf"):
                         # Case 1, p 12...skip it for now TODO
-                        print("trouble...not implemented")
+                        logResult("trouble...not implemented")
                     else:
                         # Case 2
                         x_i_1 = alpha_i1 * self.x_hat_bar + (1 - alpha_i1) * tp.projection_to_objective_plane
@@ -320,14 +323,14 @@ class LinearProgram:
             from_point  = best[2]
             self.setIFS( from_point + new_gamma * direction )
             objective_value = np.inner(self.objectiveFunction.c, self.ifs.x)
-            print('objective_value = ' + str(objective_value))
+            logResult('objective_value = ' + str(objective_value))
             if previous_objective_value - objective_value < stopping_epsilon:
                 break
             previous_objective_value = objective_value
             # near_best = (np.inner(self.objectiveFunction.c, self.x_hat + new_gamma * direction), new_gamma, direction, method_used)
 
         logResult("ifs: " + str(self.ifs.x))
-        print('Solving complete')
+        logResult('Solving complete')
         return self.ifs.x
 
 
@@ -367,7 +370,7 @@ class Constraint:
         return x - self.a * self.directedDistanceFrom(x) / self.norm
 
     def satisfies(self, x, tolerance):
-        return np.inner(self.a, x) >= self.b
+        return np.inner(self.a, x) >= self.b - tolerance
 
 class Constraints:
     def __init__(self, constraints_):
@@ -429,13 +432,13 @@ class FeasibleSolution:
         self.x = np.array(x_)
         for constraint in constraints:
             if not constraint.satisfies(self.x, 0):
-                print("This doesn't look like a feasible point!")
+                logResult("This doesn't look like a feasible point!")
                 raise ValueError
         self.norm =  np.sqrt(np.sum(self.x * self.x))
         distances = [abs(con.directedDistanceFrom(x_)) for con in constraints]
         self.delta = min(distances)
         if self.delta == 0.0:
-            print("This doesn't look like an interior point!")
+            logResult("This doesn't look like an interior point!")
             raise ValueError
         self.touching_constraints =  [constraint for dist, constraint in zip(distances, constraints) if dist / self.delta < 1.000001]
         self.touchingPoints = [TouchPoint(self.x, self.delta, constraint, objective_function) for constraint in self.touching_constraints]
@@ -485,6 +488,48 @@ class TwoVariableLP:
             raise ValueError
 
 
+class TwoVariableMinGreaterThanLP:
+    # solving min cx s/t ax >= b
+    # a is a list of 3-element lists of floats (the rows)
+    # b, c is a list of floats
+    def __init__(self, a, b, c):
+        self.a = a
+        self.b = b
+        self.c = c
+        self.optimal_x = []
+
+    def optimal_solution(self):
+        if self.optimal_x:
+            return self.optimal_x
+        m = Model("lp")
+        m.setParam('OutputFlag', 0)
+        # Create variables
+        lower_bound = -GRB.INFINITY
+        x1 = m.addVar(lb=lower_bound, vtype=GRB.CONTINUOUS, name="x1")
+        x2 = m.addVar(lb=lower_bound, vtype=GRB.CONTINUOUS, name="x2")
+        # Set objective
+        m.setObjective(x1 * self.c[0] + x2 * self.c[1], GRB.MINIMIZE)
+
+        p = 1
+        for a, b in zip(self.a, self.b):
+            m.addConstr(x1 * a[0] + x2 * a[1]  >= b, "c"+str(p))
+            p += 1
+        m.optimize()
+        vars = m.getVars()
+        if vars:
+            result = None
+            try:
+                result = [v.x for v in vars]
+            except GurobiError:
+                logResult("Unable to retrieve optimum values, so optimum may not exist.")
+            return result
+        else:
+            raise ValueError
+        return self.optimal_x
+
+    def objective_value(self):
+        return np.inner(self.c, self.optimal_solution())
+
 class ThreeVariableMinGreaterThanLP:
     # solving min cx s/t ax >= b
     # a is a list of 3-element lists of floats (the rows)
@@ -519,7 +564,60 @@ class ThreeVariableMinGreaterThanLP:
             try:
                 result = [v.x for v in vars]
             except GurobiError:
-                print("Unable to retrieve optimum values, so optimum may not exist.")
+                logResult("Unable to retrieve optimum values, so optimum may not exist.")
+            return result
+        else:
+            raise ValueError
+        return self.optimal_x
+
+    def objective_value(self):
+        return np.inner(self.c, self.optimal_solution())
+#
+#
+class NVariableMinGreaterThanLP:
+    # solving min cx s/t ax >= b
+    # a is a list of lists of floats (the rows)
+    # b, c is a list of floats
+    def __init__(self, a, b, c):
+        self.a = a
+        self.b = b
+        self.c = c
+        self.optimal_x = []
+
+    def optimal_solution(self):
+        if self.optimal_x:
+            return self.optimal_x
+        m = Model("lp")
+        m.setParam('OutputFlag', 0)
+        # Create variables
+        num_vars = len(self.a[0])
+        x_vars = []
+        for i in range(num_vars):
+            varname = "x"+str(i)
+            x_vars.append(m.addVar(lb=-GRB.INFINITY, vtype=GRB.CONTINUOUS, name=varname))
+        # Set objective
+        obj_fun = LinExpr(self.c, x_vars)
+        # [(c, x) for c, x in self.c, x_vars]
+        # obj_fun.addTerms(self.c, x_vars)
+        m.setObjective(obj_fun, GRB.MINIMIZE)
+        # m.setObjective(x1 * self.c[0] + x2 * self.c[1] + x3 * self.c[2], GRB.MINIMIZE)
+
+        p = 1
+        constraint_index =0
+        for a_row, b_row in zip(self.a, self.b):
+            # m.addConstr(x1 * a[0] + x2 * a[1] + x3 * a[2] >= b, "c"+str(p))
+            ax = LinExpr()
+            ax.addTerms(a_row, x_vars)
+            m.addConstr(ax >= b_row, "c"+str(p))
+            p += 1
+        m.optimize()
+        vars = m.getVars()
+        if vars:
+            result = None
+            try:
+                result = [v.x for v in vars]
+            except GurobiError:
+                logResult("Unable to retrieve optimum values, so optimum may not exist.")
             return result
         else:
             raise ValueError
@@ -528,40 +626,3 @@ class ThreeVariableMinGreaterThanLP:
     def objective_value(self):
         return np.inner(self.c, self.optimal_solution())
 
-
-# class GurobiThreeVarLP:
-#     # solving min cx s/t ax >= b
-#     # a is a list of lists of floats (the rows)
-#     # b, c is a list of floats
-#     def __init__(self, a, b, c):
-#         self.a = a
-#         self.b = b
-#         self.c = c
-#         self.optimal_x = []
-#
-#     def optimal_solution(self):
-#         if self.optimal_x:
-#             return self.optimal_x
-#         m = Model("lp")
-#         m.setParam('OutputFlag', 0)
-#         # Create variables
-#         x = m.addVar(vtype=GRB.CONTINUOUS, name="x")
-#         y = m.addVar(vtype=GRB.CONTINUOUS, name="y")
-#         z = m.addVar(vtype=GRB.CONTINUOUS, name="z")
-#         # Set objective
-#         m.setObjective(x * self.c[0] + y * self.c[1] + z * self.c[2], GRB.MINIMIZE)
-#
-#         p = 1
-#         for a, b in zip(self.a, self.b):
-#             m.addConstr(x * a[0] + y * a[1] + z * a[2] >= b, "c"+str(p))
-#             p += 1
-#         m.optimize()
-#         vars = m.getVars()
-#         if vars:
-#             self.optimal_x = [v.x for v in vars]
-#         else:
-#             raise ValueError
-#         return self.optimal_x
-#
-#     def objective_value(self):
-#         return np.inner(self.c, self.optimal_solution())
